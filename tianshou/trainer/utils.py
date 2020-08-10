@@ -9,15 +9,15 @@ from tianshou.policy import BasePolicy
 def test_episode(
         policy: BasePolicy,
         collector: Collector,
-        test_fn: Callable[[int], None],
+        pretest_fn: Callable[[int], None],
         epoch: int,
         n_episode: Union[int, List[int]]) -> Dict[str, float]:
     """A simple wrapper of testing policy in collector."""
     collector.reset_env()
     collector.reset_buffer()
     policy.eval()
-    if test_fn:
-        test_fn(epoch)
+    if pretest_fn:
+        pretest_fn(policy, epoch)
     if collector.get_env_num() > 1 and np.isscalar(n_episode):
         n = collector.get_env_num()
         n_ = np.zeros(n) + n_episode // n
@@ -29,7 +29,8 @@ def test_episode(
 def gather_info(start_time: float,
                 train_c: Collector,
                 test_c: Collector,
-                best_reward: float
+                best_reward: float,
+                **kwargs,
                 ) -> Dict[str, Union[float, str]]:
     """A simple wrapper of gathering information from collectors.
 
@@ -52,7 +53,7 @@ def gather_info(start_time: float,
     model_time = duration - train_c.collect_time - test_c.collect_time
     train_speed = train_c.collect_step / (duration - test_c.collect_time)
     test_speed = test_c.collect_step / test_c.collect_time
-    return {
+    res = {
         'train_step': train_c.collect_step,
         'train_episode': train_c.collect_episode,
         'train_time/collector': f'{train_c.collect_time:.2f}s',
@@ -65,3 +66,6 @@ def gather_info(start_time: float,
         'best_reward': best_reward,
         'duration': f'{duration:.2f}s',
     }
+    for k,v in kwargs.items():
+        res[k] = v
+    return res

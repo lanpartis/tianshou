@@ -2,6 +2,8 @@ import time
 import tqdm
 from torch.utils.tensorboard import SummaryWriter
 from typing import Dict, List, Union, Callable, Optional
+import pandas as pd
+from logging import Logger
 
 from tianshou.data import Collector
 from tianshou.policy import BasePolicy
@@ -19,14 +21,17 @@ def onpolicy_trainer(
         repeat_per_collect: int,
         episode_per_test: Union[int, List[int]],
         batch_size: int,
-        train_fn: Optional[Callable[[int], None]] = None,
-        test_fn: Optional[Callable[[int], None]] = None,
-        stop_fn: Optional[Callable[[float], bool]] = None,
-        save_fn: Optional[Callable[[BasePolicy], None]] = None,
+        pretrain_fn: Optional[Callable[[BasePolicy, int], None]] = None,
+        prelearn_fn: Optional[Callable[[BasePolicy, int], None]] = None,
+        pretest_fn: Optional[Callable[[BasePolicy, int], None]] = None,
+        stop_fn: Optional[Callable[[int, dict], bool]] = None,
+        save_fn: Optional[Callable[[BasePolicy, dict], None]] = None,
+        log_fn: Optional[Callable[[dict], None]] = None,
         writer: Optional[SummaryWriter] = None,
         log_interval: int = 1,
         verbose: bool = True,
         test_in_train: bool = True,
+        logger: Logger = None,
 ) -> Dict[str, Union[float, str]]:
     """A wrapper for on-policy trainer procedure. The ``step`` in trainer means
     a policy network update.
@@ -72,36 +77,39 @@ def onpolicy_trainer(
     """
     global_step = 0
     best_epoch, best_reward = -1, -1.
+    result_df = pd.DataFrame()
     stat = {}
     start_time = time.time()
     test_in_train = test_in_train and train_collector.policy == policy
     for epoch in range(1, 1 + max_epoch):
         # train
         policy.train()
-        if train_fn:
-            train_fn(epoch)
+        if pretrain_fn:
+            pretrain_fn(policy, epoch)
         with tqdm.tqdm(total=step_per_epoch, desc=f'Epoch #{epoch}',
                        **tqdm_config) as t:
             while t.n < t.total:
                 result = train_collector.collect(n_episode=collect_per_step)
                 data = {}
-                if test_in_train and stop_fn and stop_fn(result['rew']):
+                if test_in_train and stop_fn and stop_fn(epoch, result, best_reward):
                     test_result = test_episode(
-                        policy, test_collector, test_fn,
+                        policy, test_collector, pretest_fn,
                         epoch, episode_per_test, writer, global_step)
-                    if stop_fn and stop_fn(test_result['rew']):
+                    if stop_fn and stop_fn(epoch, result, best_reward):
                         if save_fn:
-                            save_fn(policy)
+                            save_fn(policy, test_result, best_reward, epoch)
                         for k in result.keys():
                             data[k] = f'{result[k]:.2f}'
                         t.set_postfix(**data)
                         return gather_info(
                             start_time, train_collector, test_collector,
-                            test_result['rew'])
+                            test_result['rew'], df=result_df)
                     else:
                         policy.train()
-                        if train_fn:
-                            train_fn(epoch)
+                        if pretrain_fn:
+                            pretrain_fn(policy, epoch)
+                if prelearn_fn:
+                    prelearn_fn(policy, epoch)
                 losses = policy.update(
                     0, train_collector.buffer, batch_size, repeat_per_collect)
                 train_collector.reset_buffer()
@@ -128,17 +136,17 @@ def onpolicy_trainer(
             if t.n <= t.total:
                 t.update()
         # test
-        result = test_episode(policy, test_collector, test_fn, epoch,
+        result = test_episode(policy, test_collector, pretest_fn, epoch,
                               episode_per_test, writer, global_step)
         if best_epoch == -1 or best_reward < result['rew']:
             best_reward = result['rew']
             best_epoch = epoch
-            if save_fn:
-                save_fn(policy)
+        if save_fn:
+            save_fn(policy, result, best_reward, epoch)
         if verbose:
             print(f'Epoch #{epoch}: test_reward: {result["rew"]:.6f}, '
                   f'best_reward: {best_reward:.6f} in #{best_epoch}')
-        if stop_fn and stop_fn(best_reward):
+        if stop_fn and stop_fn(epoch, result, best_reward):
             break
     return gather_info(
-        start_time, train_collector, test_collector, best_reward)
+        start_time, train_collector, test_collector, best_reward, df=result_df)

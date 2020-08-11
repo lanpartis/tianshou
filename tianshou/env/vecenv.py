@@ -21,9 +21,9 @@ class VectorEnv(BaseVectorEnv):
         explanation.
     """
 
-    def __init__(self, envs: List[gym.Env]) -> None:
-        super().__init__(envs)
-        self.envs = envs
+    def __init__(self, env_fns: List[Callable[[], gym.Env]]) -> None:
+        super().__init__(env_fns)
+        self.envs = [_() for _ in env_fns]
 
     def __getattr__(self, key):
         return [getattr(env, key) if hasattr(env, key) else None
@@ -72,9 +72,9 @@ class VectorEnv(BaseVectorEnv):
         return [e.close() for e in self.envs]
 
 
-def worker(parent, p, env_wrapper):
+def worker(parent, p, env_fn_wrapper):
     parent.close()
-    env = env_wrapper.data
+    env = env_fn_wrapper.data()
     try:
         while True:
             cmd, data = p.recv()
@@ -108,16 +108,16 @@ class SubprocVectorEnv(BaseVectorEnv):
         explanation.
     """
 
-    def __init__(self, envs: List[gym.Env]) -> None:
-        super().__init__(envs)
+    def __init__(self, env_fns: List[Callable[[], gym.Env]]) -> None:
+        super().__init__(env_fns)
         self.closed = False
         self.parent_remote, self.child_remote = \
             zip(*[Pipe() for _ in range(self.env_num)])
         self.processes = [
             Process(target=worker, args=(
-                parent, child, CloudpickleWrapper(env)), daemon=True)
-            for (parent, child, env) in zip(
-                self.parent_remote, self.child_remote, envs)
+                parent, child, CloudpickleWrapper(env_fn)), daemon=True)
+            for (parent, child, env_fn) in zip(
+                self.parent_remote, self.child_remote, env_fns)
         ]
         for p in self.processes:
             p.start()
@@ -192,8 +192,8 @@ class RayVectorEnv(BaseVectorEnv):
         explanation.
     """
 
-    def __init__(self, envs: List[gym.Env]) -> None:
-        super().__init__(envs)
+    def __init__(self, env_fns: List[Callable[[], gym.Env]]) -> None:
+        super().__init__(env_fns)
         try:
             if not ray.is_initialized():
                 ray.init()
@@ -201,8 +201,8 @@ class RayVectorEnv(BaseVectorEnv):
             raise ImportError(
                 'Please install ray to support RayVectorEnv: pip3 install ray')
         self.envs = [
-            ray.remote(gym.Wrapper).options(num_cpus=0).remote(e)
-            for e in envs]
+            ray.remote(gym.Wrapper).options(num_cpus=0).remote(e())
+            for e in env_fns]
 
     def __getattr__(self, key):
         return ray.get([e.__getattr__.remote(key) for e in self.envs])

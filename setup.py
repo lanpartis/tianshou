@@ -23,6 +23,7 @@ setup(
     author_email='trinkle23897@gmail.com',
     license='MIT',
     python_requires='>=3.6',
+    zip_safe=False,
     classifiers=[
         # How mature is this project? Common values are
         #   3 - Alpha

@@ -128,6 +128,8 @@ def offpolicy_trainer(
                         if writer and global_step % log_interval == 0:
                             writer.add_scalar(
                                 k, stat[k].get(), global_step=global_step)
+                    data_df = pd.DataFrame(data, index=[0])
+                    result_df = result_df.append(data_df, ignore_index=True)
                     t.update(1)
                     t.set_postfix(**data)
             if t.n <= t.total:

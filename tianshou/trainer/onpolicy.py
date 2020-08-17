@@ -132,6 +132,8 @@ def onpolicy_trainer(
                     if writer and global_step % log_interval == 0:
                         writer.add_scalar(
                             k, stat[k].get(), global_step=global_step)
+                data_df = pd.DataFrame(data, index=[0])
+                result_df = result_df.append(data_df, ignore_index=True)
                 t.update(step)
                 t.set_postfix(**data)
             if t.n <= t.total:
@@ -145,7 +147,10 @@ def onpolicy_trainer(
         if save_fn:
             save_fn(policy, result, best_reward, epoch)
         if verbose:
-            print(f'Epoch #{epoch}: test_reward: {result["rew"]:.6f}, '
+            pt = print
+            if logger:
+                pt = logger.info
+            pt(f'Epoch #{epoch}: test_reward: {result["rew"]:.6f}, '
                   f'best_reward: {best_reward:.6f} in #{best_epoch}')
         if stop_fn and stop_fn(epoch, result, best_reward):
             break

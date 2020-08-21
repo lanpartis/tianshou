@@ -137,11 +137,11 @@ def offpolicy_trainer(
         # test
         result = test_episode(policy, test_collector, pretest_fn, epoch,
                               episode_per_test, writer, global_step)
+        if save_fn:
+            save_fn(policy, result, best_reward, epoch)
         if best_epoch == -1 or best_reward < result['rew']:
             best_reward = result['rew']
             best_epoch = epoch
-        if save_fn:
-            save_fn(policy, result, best_reward, epoch)
         if verbose:
             pt = print
             if logger:

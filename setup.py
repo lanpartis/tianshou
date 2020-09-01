@@ -6,7 +6,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='tianshou',
-    version='0.2.6',
+    version='0.2.8',
     description='A Library for Deep Reinforcement Learning',
     long_description=open('README.md', encoding='utf8').read(),
     long_description_content_type='text/markdown',

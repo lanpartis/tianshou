@@ -141,13 +141,12 @@ class DDPGPolicy(BasePolicy):
         return Batch(act=actions, state=h)
 
     def learn(self, batch: Batch, **kwargs) -> Dict[str, float]:
+        weight = batch.pop('weight', 1.)
         current_q = self.critic(batch.obs, batch.act).flatten()
         target_q = batch.returns.flatten()
         td = current_q - target_q
-        if hasattr(batch, 'update_weight'):  # prio-buffer
-            batch.update_weight(batch.indice, td)
-        critic_loss = (td.pow(2) * batch.weight).mean()
-        # critic_loss = F.mse_loss(current_q, target_q)
+        critic_loss = (td.pow(2) * weight).mean()
+        batch.weight = td  # prio-buffer
         self.critic_optim.zero_grad()
         critic_loss.backward()
         self.critic_optim.step()

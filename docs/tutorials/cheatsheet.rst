@@ -31,22 +31,50 @@ See :ref:`customized_trainer`.
 Parallel Sampling
 -----------------
 
-Use :class:`~tianshou.env.VectorEnv`, :class:`~tianshou.env.SubprocVectorEnv` or :class:`~tianshou.env.ShmemVectorEnv`.
-::
+Tianshou provides the following classes for parallel environment simulation:
 
-    env_fns = [
-        lambda: MyTestEnv(size=2),
-        lambda: MyTestEnv(size=3),
-        lambda: MyTestEnv(size=4),
-        lambda: MyTestEnv(size=5),
-    ]
-    venv = SubprocVectorEnv(env_fns)
+- :class:`~tianshou.env.DummyVectorEnv` is for pseudo-parallel simulation (implemented with a for-loop, useful for debugging).
 
-where ``env_fns`` is a list of callable env hooker. The above code can be written in for-loop as well:
+- :class:`~tianshou.env.SubprocVectorEnv` uses multiple processes for parallel simulation. This is the most often choice for parallel simulation.
+
+- :class:`~tianshou.env.ShmemVectorEnv` has a similar implementation to :class:`~tianshou.env.SubprocVectorEnv`, but is optimized (in terms of both memory footprint and simulation speed) for environments with large observations such as images.
+
+- :class:`~tianshou.env.RayVectorEnv` is currently the only choice for parallel simulation in a cluster with multiple machines.
+
+Although these classes are optimized for different scenarios, they have exactly the same APIs because they are sub-classes of :class:`~tianshou.env.BaseVectorEnv`. Just provide a list of functions who return environments upon called, and it is all set.
+
 ::
 
     env_fns = [lambda x=i: MyTestEnv(size=x) for i in [2, 3, 4, 5]]
-    venv = SubprocVectorEnv(env_fns)
+    venv = SubprocVectorEnv(env_fns)  # DummyVectorEnv, ShmemVectorEnv, or RayVectorEnv, whichever you like.
+    venv.reset()  # returns the initial observations of each environment
+    venv.step(actions)  # provide actions for each environment and get their results
+
+.. sidebar:: An example of sync/async VectorEnv (steps with the same color end up in one batch that is disposed by the policy at the same time).
+
+     .. Figure:: ../_static/images/async.png
+
+By default, parallel environment simulation is synchronous: a step is done after all environments have finished a step. Synchronous simulation works well if each step of environments costs roughly the same time.
+
+In case the time cost of environments varies a lot (e.g. 90% step cost 1s, but 10% cost 10s) where slow environments lag fast environments behind, async simulation can be used (related to `Issue 103 <https://github.com/thu-ml/tianshou/issues/103>`_). The idea is to start those finished environments without waiting for slow environments.
+
+Asynchronous simulation is a built-in functionality of :class:`~tianshou.env.BaseVectorEnv`. Just provide ``wait_num`` or ``timeout`` (or both) and async simulation works.
+
+::
+
+    env_fns = [lambda x=i: MyTestEnv(size=x, sleep=x) for i in [2, 3, 4, 5]]
+    # DummyVectorEnv, ShmemVectorEnv, or RayVectorEnv, whichever you like.
+    venv = SubprocVectorEnv(env_fns, wait_num=3, timeout=0.2)
+    venv.reset()  # returns the initial observations of each environment
+    # returns ``wait_num`` steps or finished steps after ``timeout`` seconds,
+    # whichever occurs first.
+    venv.step(actions, ready_id)
+
+If we have 4 envs and set ``wait_num = 3``, each of the step only returns 3 results of these 4 envs.
+
+You can treat the ``timeout`` parameter as a dynamic ``wait_num``. In each vectorized step it only returns the environments finished within the given time. If there is no such environment, it will wait until any of them finished.
+
+The figure in the right gives an intuitive comparison among synchronous/asynchronous simulation.
 
 .. warning::
 
@@ -68,7 +96,7 @@ This is related to `Issue 42 <https://github.com/thu-ml/tianshou/issues/42>`_.
 
 If you want to get log stat from data stream / pre-process batch-image / modify the reward with given env info, use ``preproces_fn`` in :class:`~tianshou.data.Collector`. This is a hook which will be called before the data adding into the buffer.
 
-This function receives typically 7 keys, as listed in :class:`~tianshou.data.Batch`, and returns the modified part within a dict or a Batch. For example, you can write your hook as:
+This function receives up to 7 keys ``obs``, ``act``, ``rew``, ``done``, ``obs_next``, ``info``, and ``policy``, as listed in :class:`~tianshou.data.Batch`, and returns the modified part within a :class:`~tianshou.data.Batch`. Only ``obs`` is defined at env reset, while every key is specified for normal steps. For example, you can write your hook as:
 ::
 
     import numpy as np
@@ -81,9 +109,11 @@ This function receives typically 7 keys, as listed in :class:`~tianshou.data.Bat
             self.baseline = 0
         def preprocess_fn(**kwargs):
             """change reward to zero mean"""
+            # if only obs exist -> reset
+            # if obs/act/rew/done/... exist -> normal step
             if 'rew' not in kwargs:
                 # means that it is called after env.reset(), it can only process the obs
-                return {}  # none of the variables are needed to be updated
+                return Batch()  # none of the variables are needed to be updated
             else:
                 n = len(kwargs['rew'])  # the number of envs in collector
                 if self.episode_log is None:
@@ -97,7 +127,6 @@ This function receives typically 7 keys, as listed in :class:`~tianshou.data.Bat
                         self.episode_log[i] = []
                         self.baseline = np.mean(self.main_log)
                 return Batch(rew=kwargs['rew'])
-                # you can also return with {'rew': kwargs['rew']}
 
 And finally,
 ::
@@ -139,9 +168,9 @@ First of all, your self-defined environment must follow the Gym's API, some of t
 
 - step(action) -> state, reward, done, info
 
-- seed(s) -> None
+- seed(s) -> List[int]
 
-- render(mode) -> None
+- render(mode) -> Any
 
 - close() -> None
 

@@ -7,14 +7,14 @@ class BaseNoise(ABC, object):
     """The action noise base class."""
 
     def __init__(self, **kwargs) -> None:
-        super(BaseNoise, self).__init__()
+        super().__init__()
 
     @abstractmethod
     def __call__(self, **kwargs) -> np.ndarray:
         """Generate new noise."""
         raise NotImplementedError
 
-    def reset(self, **kwargs) -> None:
+    def reset(self) -> None:
         """Reset to the initial state."""
         pass
 

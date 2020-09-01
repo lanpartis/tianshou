@@ -28,7 +28,8 @@ def onpolicy_trainer(
         verbose: bool = True,
         test_in_train: bool = True,
 ) -> Dict[str, Union[float, str]]:
-    """A wrapper for on-policy trainer procedure.
+    """A wrapper for on-policy trainer procedure. The ``step`` in trainer means
+    a policy network update.
 
     :param policy: an instance of the :class:`~tianshou.policy.BasePolicy`
         class.
@@ -70,7 +71,7 @@ def onpolicy_trainer(
     :return: See :func:`~tianshou.trainer.gather_info`.
     """
     global_step = 0
-    best_epoch, best_reward = -1, -1
+    best_epoch, best_reward = -1, -1.
     stat = {}
     start_time = time.time()
     test_in_train = test_in_train and train_collector.policy == policy
@@ -87,7 +88,7 @@ def onpolicy_trainer(
                 if test_in_train and stop_fn and stop_fn(result['rew']):
                     test_result = test_episode(
                         policy, test_collector, test_fn,
-                        epoch, episode_per_test)
+                        epoch, episode_per_test, writer, global_step)
                     if stop_fn and stop_fn(test_result['rew']):
                         if save_fn:
                             save_fn(policy)
@@ -101,19 +102,19 @@ def onpolicy_trainer(
                         policy.train()
                         if train_fn:
                             train_fn(epoch)
-                losses = policy.learn(
-                    train_collector.sample(0), batch_size, repeat_per_collect)
+                losses = policy.update(
+                    0, train_collector.buffer, batch_size, repeat_per_collect)
                 train_collector.reset_buffer()
                 step = 1
                 for k in losses.keys():
                     if isinstance(losses[k], list):
                         step = max(step, len(losses[k]))
-                global_step += step
+                global_step += step * collect_per_step
                 for k in result.keys():
                     data[k] = f'{result[k]:.2f}'
                     if writer and global_step % log_interval == 0:
                         writer.add_scalar(
-                            k, result[k], global_step=global_step)
+                            'train/' + k, result[k], global_step=global_step)
                 for k in losses.keys():
                     if stat.get(k) is None:
                         stat[k] = MovAvg()
@@ -127,8 +128,8 @@ def onpolicy_trainer(
             if t.n <= t.total:
                 t.update()
         # test
-        result = test_episode(
-            policy, test_collector, test_fn, epoch, episode_per_test)
+        result = test_episode(policy, test_collector, test_fn, epoch,
+                              episode_per_test, writer, global_step)
         if best_epoch == -1 or best_reward < result['rew']:
             best_reward = result['rew']
             best_epoch = epoch

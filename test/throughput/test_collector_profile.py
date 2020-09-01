@@ -5,7 +5,7 @@ from gym.spaces.discrete import Discrete
 from gym.utils import seeding
 
 from tianshou.data import Batch, Collector, ReplayBuffer
-from tianshou.env import VectorEnv, SubprocVectorEnv
+from tianshou.env import DummyVectorEnv, SubprocVectorEnv
 from tianshou.policy import BasePolicy
 
 
@@ -22,8 +22,7 @@ class SimpleEnv(gym.Env):
     def reset(self):
         self._index = 0
         self.done = np.random.randint(3, high=200)
-        return {'observable': np.zeros((10, 10, 1)),
-                'hidden': self._index}
+        return {'observable': np.zeros((10, 10, 1)), 'hidden': self._index}
 
     def step(self, action):
         if self._index == self.done:
@@ -48,7 +47,7 @@ class SimplePolicy(BasePolicy):
         return super().learn(batch, **kwargs)
 
     def forward(self, batch, state=None, **kwargs):
-        return Batch(act=np.array([30]*len(batch)), state=None, logits=None)
+        return Batch(act=np.array([30] * len(batch)), state=None, logits=None)
 
 
 @pytest.fixture(scope="module")
@@ -56,11 +55,9 @@ def data():
     np.random.seed(0)
     env = SimpleEnv()
     env.seed(0)
-    env_vec = VectorEnv(
-        [lambda: SimpleEnv() for _ in range(100)])
+    env_vec = DummyVectorEnv([lambda: SimpleEnv() for _ in range(100)])
     env_vec.seed(np.random.randint(1000, size=100).tolist())
-    env_subproc = SubprocVectorEnv(
-        [lambda: SimpleEnv() for _ in range(8)])
+    env_subproc = SubprocVectorEnv([lambda: SimpleEnv() for _ in range(8)])
     env_subproc.seed(np.random.randint(1000, size=100).tolist())
     env_subproc_init = SubprocVectorEnv(
         [lambda: SimpleEnv() for _ in range(8)])
@@ -70,7 +67,7 @@ def data():
     collector = Collector(policy, env, ReplayBuffer(50000))
     collector_vec = Collector(policy, env_vec, ReplayBuffer(50000))
     collector_subproc = Collector(policy, env_subproc, ReplayBuffer(50000))
-    return{
+    return {
         "env": env,
         "env_vec": env_vec,
         "env_subproc": env_subproc,
@@ -79,14 +76,13 @@ def data():
         "buffer": buffer,
         "collector": collector,
         "collector_vec": collector_vec,
-        "collector_subproc": collector_subproc
-        }
+        "collector_subproc": collector_subproc,
+    }
 
 
 def test_init(data):
     for _ in range(5000):
-        c = Collector(data["policy"], data["env"], data["buffer"])
-        c.close()
+        Collector(data["policy"], data["env"], data["buffer"])
 
 
 def test_reset(data):
@@ -111,8 +107,7 @@ def test_sample(data):
 
 def test_init_vec_env(data):
     for _ in range(5000):
-        c = Collector(data["policy"], data["env_vec"], data["buffer"])
-        c.close()
+        Collector(data["policy"], data["env_vec"], data["buffer"])
 
 
 def test_reset_vec_env(data):
@@ -137,10 +132,7 @@ def test_sample_vec_env(data):
 
 def test_init_subproc_env(data):
     for _ in range(5000):
-        c = Collector(data["policy"], data["env_subproc_init"], data["buffer"])
-        """TODO: This should be changed to c.close() in theory,
-        but currently subproc_env doesn't support that."""
-        c.reset()
+        Collector(data["policy"], data["env_subproc_init"], data["buffer"])
 
 
 def test_reset_subproc_env(data):

@@ -34,6 +34,10 @@ class PPOPolicy(PGPolicy):
         defaults to ``True``.
     :param bool reward_normalization: normalize the returns to Normal(0, 1),
         defaults to ``True``.
+    :param int max_batchsize: the maximum size of the batch when computing GAE,
+        depends on the size of available memory and the memory cost of the
+        model; should be as large as possible within the memory constraint;
+        defaults to 256.
 
     .. seealso::
 
@@ -56,6 +60,7 @@ class PPOPolicy(PGPolicy):
                  dual_clip: Optional[float] = None,
                  value_clip: bool = True,
                  reward_normalization: bool = True,
+                 max_batchsize: int = 256,
                  **kwargs) -> None:
         super().__init__(None, None, dist_fn, discount_factor, **kwargs)
         self._max_grad_norm = max_grad_norm
@@ -66,7 +71,7 @@ class PPOPolicy(PGPolicy):
         self.actor = actor
         self.critic = critic
         self.optim = optim
-        self._batch = 64
+        self._batch = max_batchsize
         assert 0 <= gae_lambda <= 1, 'GAE lambda should be in [0, 1].'
         self._lambda = gae_lambda
         assert dual_clip is None or dual_clip > 1, \
@@ -79,18 +84,29 @@ class PPOPolicy(PGPolicy):
                    indice: np.ndarray) -> Batch:
         if self._rew_norm:
             mean, std = batch.rew.mean(), batch.rew.std()
-            if not np.isclose(std, 0):
+            if not np.isclose(std, 0, 1e-2):
                 batch.rew = (batch.rew - mean) / std
-        if self._lambda in [0, 1]:
-            return self.compute_episodic_return(
-                batch, None, gamma=self._gamma, gae_lambda=self._lambda)
-        v_ = []
+        v, v_, old_log_prob = [], [], []
         with torch.no_grad():
-            for b in batch.split(self._batch, shuffle=False):
+            for b in batch.split(self._batch, shuffle=False, merge_last=True):
                 v_.append(self.critic(b.obs_next))
+                v.append(self.critic(b.obs))
+                old_log_prob.append(self(b).dist.log_prob(
+                    to_torch_as(b.act, v[0])))
         v_ = to_numpy(torch.cat(v_, dim=0))
-        return self.compute_episodic_return(
-            batch, v_, gamma=self._gamma, gae_lambda=self._lambda)
+        batch = self.compute_episodic_return(
+            batch, v_, gamma=self._gamma, gae_lambda=self._lambda,
+            rew_norm=self._rew_norm)
+        batch.v = torch.cat(v, dim=0).flatten()  # old value
+        batch.act = to_torch_as(batch.act, v[0])
+        batch.logp_old = torch.cat(old_log_prob, dim=0)
+        batch.returns = to_torch_as(batch.returns, v[0])
+        batch.adv = batch.returns - batch.v
+        if self._rew_norm:
+            mean, std = batch.adv.mean(), batch.adv.std()
+            if not np.isclose(std.item(), 0, 1e-2):
+                batch.adv = (batch.adv - mean) / std
+        return batch
 
     def forward(self, batch: Batch,
                 state: Optional[Union[dict, Batch, np.ndarray]] = None,
@@ -121,30 +137,9 @@ class PPOPolicy(PGPolicy):
 
     def learn(self, batch: Batch, batch_size: int, repeat: int,
               **kwargs) -> Dict[str, List[float]]:
-        self._batch = batch_size
         losses, clip_losses, vf_losses, ent_losses = [], [], [], []
-        v = []
-        old_log_prob = []
-        with torch.no_grad():
-            for b in batch.split(batch_size, shuffle=False):
-                v.append(self.critic(b.obs))
-                old_log_prob.append(self(b).dist.log_prob(
-                    to_torch_as(b.act, v[0])))
-        batch.v = torch.cat(v, dim=0).flatten()  # old value
-        batch.act = to_torch_as(batch.act, v[0])
-        batch.logp_old = torch.cat(old_log_prob, dim=0)
-        batch.returns = to_torch_as(batch.returns, v[0])
-        if self._rew_norm:
-            mean, std = batch.returns.mean(), batch.returns.std()
-            if not np.isclose(std.item(), 0):
-                batch.returns = (batch.returns - mean) / std
-        batch.adv = batch.returns - batch.v
-        if self._rew_norm:
-            mean, std = batch.adv.mean(), batch.adv.std()
-            if not np.isclose(std.item(), 0):
-                batch.adv = (batch.adv - mean) / std
         for _ in range(repeat):
-            for b in batch.split(batch_size):
+            for b in batch.split(batch_size, merge_last=True):
                 dist = self(b).dist
                 value = self.critic(b.obs).flatten()
                 ratio = (dist.log_prob(b.act) - b.logp_old).exp().float()

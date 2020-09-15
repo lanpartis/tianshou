@@ -143,7 +143,7 @@ def onpolicy_trainer(
         result = test_episode(policy, test_collector, pretest_fn, epoch,
                               episode_per_test, writer, global_step)
         if postepoch_fn:
-            postepoch_fn(epoch=epoch, reward=result["rew"])
+            postepoch_fn(epoch=epoch, reward=result["rew"],result_df=result_df)
         if save_fn:
             save_fn(policy, result, best_reward, epoch)
         if best_epoch == -1 or best_reward < result['rew']:

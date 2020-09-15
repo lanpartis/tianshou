@@ -24,6 +24,7 @@ def offpolicy_trainer(
         pretrain_fn: Optional[Callable[[BasePolicy, int], None]] = None,
         prelearn_fn: Optional[Callable[[BasePolicy, int], None]] = None,
         pretest_fn: Optional[Callable[[BasePolicy, int], None]] = None,
+        postepoch_fn: Optional[Callable[[int, float, ReplayBuffer], None]] = None,
         stop_fn: Optional[Callable[[int, dict], bool]] = None,
         save_fn: Optional[Callable[[BasePolicy, dict, int, int], None]] = None,
         log_fn: Optional[Callable[[dict], None]] = None,
@@ -32,7 +33,6 @@ def offpolicy_trainer(
         verbose: bool = True,
         test_in_train: bool = True,
         logger: Logger = None,
-        postepoch_fn: Optional[Callable[[int, float, ReplayBuffer], None]] = None,
         start_epoch: int = 1
 ) -> Dict[str, Union[float, str]]:
     """A wrapper for off-policy trainer procedure. The ``step`` in trainer

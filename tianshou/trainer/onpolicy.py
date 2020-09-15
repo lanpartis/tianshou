@@ -24,6 +24,7 @@ def onpolicy_trainer(
         pretrain_fn: Optional[Callable[[BasePolicy, int], None]] = None,
         prelearn_fn: Optional[Callable[[BasePolicy, int], None]] = None,
         pretest_fn: Optional[Callable[[BasePolicy, int], None]] = None,
+        postepoch_fn: Optional[Callable[[int, float], None]] = None,
         stop_fn: Optional[Callable[[int, dict], bool]] = None,
         save_fn: Optional[Callable[[BasePolicy, dict], None]] = None,
         log_fn: Optional[Callable[[dict], None]] = None,
@@ -32,6 +33,7 @@ def onpolicy_trainer(
         verbose: bool = True,
         test_in_train: bool = True,
         logger: Logger = None,
+        start_epoch: int = 1
 ) -> Dict[str, Union[float, str]]:
     """A wrapper for on-policy trainer procedure. The ``step`` in trainer means
     a policy network update.
@@ -81,7 +83,7 @@ def onpolicy_trainer(
     stat = {}
     start_time = time.time()
     test_in_train = test_in_train and train_collector.policy == policy
-    for epoch in range(1, 1 + max_epoch):
+    for epoch in range(start_epoch, 1 + max_epoch):
         # train
         policy.train()
         if pretrain_fn:
@@ -140,6 +142,8 @@ def onpolicy_trainer(
         # test
         result = test_episode(policy, test_collector, pretest_fn, epoch,
                               episode_per_test, writer, global_step)
+        if postepoch_fn:
+            postepoch_fn(epoch=epoch, reward=result["rew"],result_df=result_df)
         if save_fn:
             save_fn(policy, result, best_reward, epoch)
         if best_epoch == -1 or best_reward < result['rew']:
@@ -150,7 +154,7 @@ def onpolicy_trainer(
             if logger:
                 pt = logger.info
             pt(f'Epoch #{epoch}: test_reward: {result["rew"]:.6f}, '
-                  f'best_reward: {best_reward:.6f} in #{best_epoch}')
+               f'best_reward: {best_reward:.6f} in #{best_epoch}')
         if stop_fn and stop_fn(epoch, result, best_reward):
             break
     return gather_info(

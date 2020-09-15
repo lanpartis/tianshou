@@ -5,7 +5,7 @@ from typing import Dict, List, Union, Callable, Optional
 from logging import Logger
 import pandas as pd
 
-from tianshou.data import Collector
+from tianshou.data import Collector, ReplayBuffer
 from tianshou.policy import BasePolicy
 from tianshou.utils import tqdm_config, MovAvg
 from tianshou.trainer import test_episode, gather_info
@@ -32,6 +32,8 @@ def offpolicy_trainer(
         verbose: bool = True,
         test_in_train: bool = True,
         logger: Logger = None,
+        save_checkpoint_fn: Optional[Callable[[int, float, ReplayBuffer], None]] = None,
+        start_epoch:int = 1
 ) -> Dict[str, Union[float, str]]:
     """A wrapper for off-policy trainer procedure. The ``step`` in trainer
     means a policy network update.
@@ -82,7 +84,7 @@ def offpolicy_trainer(
     stat = {}
     start_time = time.time()
     test_in_train = test_in_train and train_collector.policy == policy
-    for epoch in range(1, 1 + max_epoch):
+    for epoch in range(start_epoch, 1 + max_epoch):
         # train
         policy.train()
         if pretrain_fn:
@@ -137,6 +139,9 @@ def offpolicy_trainer(
         # test
         result = test_episode(policy, test_collector, pretest_fn, epoch,
                               episode_per_test, writer, global_step)
+        if save_checkpoint_fn:
+            save_checkpoint_fn(epoch=epoch,reward=result["rew"],buffer=train_collector.buffer)
+
         if save_fn:
             save_fn(policy, result, best_reward, epoch)
         if best_epoch == -1 or best_reward < result['rew']:

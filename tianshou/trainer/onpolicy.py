@@ -5,7 +5,7 @@ from typing import Dict, List, Union, Callable, Optional
 import pandas as pd
 from logging import Logger
 
-from tianshou.data import Collector, ReplayBuffer
+from tianshou.data import Collector
 from tianshou.policy import BasePolicy
 from tianshou.utils import tqdm_config, MovAvg
 from tianshou.trainer import test_episode, gather_info
@@ -24,7 +24,7 @@ def onpolicy_trainer(
         pretrain_fn: Optional[Callable[[BasePolicy, int], None]] = None,
         prelearn_fn: Optional[Callable[[BasePolicy, int], None]] = None,
         pretest_fn: Optional[Callable[[BasePolicy, int], None]] = None,
-        postepoch_fn: Optional[Callable[[int, float, ReplayBuffer], None]] = None,
+        postepoch_fn: Optional[Callable[[int, float], None]] = None,
         stop_fn: Optional[Callable[[int, dict], bool]] = None,
         save_fn: Optional[Callable[[BasePolicy, dict], None]] = None,
         log_fn: Optional[Callable[[dict], None]] = None,

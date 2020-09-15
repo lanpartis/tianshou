@@ -32,8 +32,8 @@ def offpolicy_trainer(
         verbose: bool = True,
         test_in_train: bool = True,
         logger: Logger = None,
-        save_checkpoint_fn: Optional[Callable[[int, float, ReplayBuffer], None]] = None,
-        start_epoch:int = 1
+        postepoch_fn: Optional[Callable[[int, float, ReplayBuffer], None]] = None,
+        start_epoch: int = 1
 ) -> Dict[str, Union[float, str]]:
     """A wrapper for off-policy trainer procedure. The ``step`` in trainer
     means a policy network update.
@@ -139,8 +139,8 @@ def offpolicy_trainer(
         # test
         result = test_episode(policy, test_collector, pretest_fn, epoch,
                               episode_per_test, writer, global_step)
-        if save_checkpoint_fn:
-            save_checkpoint_fn(epoch=epoch,reward=result["rew"],buffer=train_collector.buffer)
+        if postepoch_fn:
+            postepoch_fn(epoch=epoch, reward=result["rew"], buffer=train_collector.buffer)
 
         if save_fn:
             save_fn(policy, result, best_reward, epoch)
@@ -152,7 +152,7 @@ def offpolicy_trainer(
             if logger:
                 pt = logger.info
             pt(f'Epoch #{epoch}: test_reward: {result["rew"]:.6f}, '
-                  f'best_reward: {best_reward:.6f} in #{best_epoch}')
+                 f'best_reward: {best_reward:.6f} in #{best_epoch}')
         if stop_fn and stop_fn(epoch, result, best_reward):
             break
     return gather_info(

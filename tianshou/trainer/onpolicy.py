@@ -32,8 +32,7 @@ def onpolicy_trainer(
         verbose: bool = True,
         test_in_train: bool = True,
         logger: Logger = None,
-        save_checkpoint_fn: Optional[Callable[[
-            int, float, ReplayBuffer], None]] = None,
+        postepoch_fn: Optional[Callable[[int, float, ReplayBuffer], None]] = None,
         start_epoch: int = 1
 ) -> Dict[str, Union[float, str]]:
     """A wrapper for on-policy trainer procedure. The ``step`` in trainer means
@@ -143,8 +142,8 @@ def onpolicy_trainer(
         # test
         result = test_episode(policy, test_collector, pretest_fn, epoch,
                               episode_per_test, writer, global_step)
-        if save_checkpoint_fn:
-            save_checkpoint_fn(epoch=epoch, reward=result["rew"])
+        if postepoch_fn:
+            postepoch_fn(epoch=epoch, reward=result["rew"])
         if save_fn:
             save_fn(policy, result, best_reward, epoch)
         if best_epoch == -1 or best_reward < result['rew']:

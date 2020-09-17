@@ -77,7 +77,7 @@ def offpolicy_trainer(
 
     :return: See :func:`~tianshou.trainer.gather_info`.
     """
-    global_step = 0
+    global_step = start_epoch * collect_per_step
 
     best_epoch, best_reward = -1, -1.
     result_df = pd.DataFrame()

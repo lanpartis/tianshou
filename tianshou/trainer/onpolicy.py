@@ -78,7 +78,8 @@ def onpolicy_trainer(
 
     :return: See :func:`~tianshou.trainer.gather_info`.
     """
-    global_step = start_epoch * collect_per_step
+    global_step = start_epoch * step_per_epoch * collect_per_step
+    
     best_epoch, best_reward = -1, -1.
     stat = {}
     start_time = time.time()

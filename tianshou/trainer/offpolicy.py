@@ -36,8 +36,9 @@ def offpolicy_trainer(
         start_epoch: int = 1,
         result_df: pd.DataFrame = pd.DataFrame()
 ) -> Dict[str, Union[float, str]]:
-    """A wrapper for off-policy trainer procedure. The ``step`` in trainer
-    means a policy network update.
+    """A wrapper for off-policy trainer procedure.
+
+    The "step" in trainer means a policy network update.
 
     :param policy: an instance of the :class:`~tianshou.policy.BasePolicy`
         class.
@@ -80,8 +81,8 @@ def offpolicy_trainer(
     """
     global_step = start_epoch * step_per_epoch * collect_per_step
 
-    best_epoch, best_reward = -1, -1.
-    stat = {}
+    best_epoch, best_reward = -1, -1.0
+    stat: Dict[str, MovAvg] = {}
     start_time = time.time()
     test_in_train = test_in_train and train_collector.policy == policy
     for epoch in range(start_epoch, 1 + max_epoch):
@@ -102,7 +103,7 @@ def offpolicy_trainer(
                         if save_fn:
                             save_fn(policy, test_result, best_reward, epoch)
                         for k in result.keys():
-                            data[k] = f'{result[k]:.2f}'
+                            data[k] = f"{result[k]:.2f}"
                         t.set_postfix(**data)
                         return gather_info(
                             start_time, train_collector, test_collector,
@@ -114,19 +115,19 @@ def offpolicy_trainer(
                 if prelearn_fn:
                     prelearn_fn(policy, epoch)
                 for i in range(update_per_step * min(
-                        result['n/st'] // collect_per_step, t.total - t.n)):
+                        result["n/st"] // collect_per_step, t.total - t.n)):
                     global_step += collect_per_step
                     losses = policy.update(batch_size, train_collector.buffer)
                     for k in result.keys():
-                        data[k] = f'{result[k]:.2f}'
+                        data[k] = f"{result[k]:.2f}"
                         if writer and global_step % log_interval == 0:
-                            writer.add_scalar('train/' + k, result[k],
+                            writer.add_scalar("train/" + k, result[k],
                                               global_step=global_step)
                     for k in losses.keys():
                         if stat.get(k) is None:
                             stat[k] = MovAvg()
                         stat[k].add(losses[k])
-                        data[k] = f'{stat[k].get():.6f}'
+                        data[k] = f"{stat[k].get():.6f}"
                         if writer and global_step % log_interval == 0:
                             writer.add_scalar(
                                 k, stat[k].get(), global_step=global_step)

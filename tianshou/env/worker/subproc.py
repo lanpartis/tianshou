@@ -5,58 +5,10 @@ import numpy as np
 from collections import OrderedDict
 from multiprocessing.context import Process
 from multiprocessing import Array, Pipe, connection
-from typing import Callable, Any, List, Tuple, Optional
+from typing import Any, List, Tuple, Union, Callable, Optional
 
 from tianshou.env.worker import EnvWorker
 from tianshou.env.utils import CloudpickleWrapper
-
-
-def _worker(parent, p, env_fn_wrapper, obs_bufs=None):
-    def _encode_obs(obs, buffer):
-        if isinstance(obs, np.ndarray):
-            buffer.save(obs)
-        elif isinstance(obs, tuple):
-            for o, b in zip(obs, buffer):
-                _encode_obs(o, b)
-        elif isinstance(obs, dict):
-            for k in obs.keys():
-                _encode_obs(obs[k], buffer[k])
-        return None
-
-    parent.close()
-    env = env_fn_wrapper.data()
-    try:
-        while True:
-            try:
-                cmd, data = p.recv()
-            except EOFError:  # the pipe has been closed
-                p.close()
-                break
-            if cmd == 'step':
-                obs, reward, done, info = env.step(data)
-                if obs_bufs is not None:
-                    obs = _encode_obs(obs, obs_bufs)
-                p.send((obs, reward, done, info))
-            elif cmd == 'reset':
-                obs = env.reset()
-                if obs_bufs is not None:
-                    obs = _encode_obs(obs, obs_bufs)
-                p.send(obs)
-            elif cmd == 'close':
-                p.send(env.close())
-                p.close()
-                break
-            elif cmd == 'render':
-                p.send(env.render(**data) if hasattr(env, 'render') else None)
-            elif cmd == 'seed':
-                p.send(env.seed(data) if hasattr(env, 'seed') else None)
-            elif cmd == 'getattr':
-                p.send(getattr(env, data) if hasattr(env, data) else None)
-            else:
-                p.close()
-                raise NotImplementedError
-    except KeyboardInterrupt:
-        p.close()
 
 
 _NP_TO_CT = {
@@ -76,63 +28,130 @@ _NP_TO_CT = {
 
 
 class ShArray:
-    """Wrapper of multiprocessing Array"""
+    """Wrapper of multiprocessing Array."""
 
-    def __init__(self, dtype, shape):
-        self.arr = Array(_NP_TO_CT[dtype.type], int(np.prod(shape)))
+    def __init__(self, dtype: np.generic, shape: Tuple[int]) -> None:
+        self.arr = Array(
+            _NP_TO_CT[dtype.type],  # type: ignore
+            int(np.prod(shape)),
+        )
         self.dtype = dtype
         self.shape = shape
 
-    def save(self, ndarray):
+    def save(self, ndarray: np.ndarray) -> None:
         assert isinstance(ndarray, np.ndarray)
         dst = self.arr.get_obj()
         dst_np = np.frombuffer(dst, dtype=self.dtype).reshape(self.shape)
         np.copyto(dst_np, ndarray)
 
-    def get(self):
-        return np.frombuffer(self.arr.get_obj(),
-                             dtype=self.dtype).reshape(self.shape)
+    def get(self) -> np.ndarray:
+        obj = self.arr.get_obj()
+        return np.frombuffer(obj, dtype=self.dtype).reshape(self.shape)
 
 
-def _setup_buf(space):
+def _setup_buf(space: gym.Space) -> Union[dict, tuple, ShArray]:
     if isinstance(space, gym.spaces.Dict):
         assert isinstance(space.spaces, OrderedDict)
-        buffer = {k: _setup_buf(v) for k, v in space.spaces.items()}
+        return {k: _setup_buf(v) for k, v in space.spaces.items()}
     elif isinstance(space, gym.spaces.Tuple):
         assert isinstance(space.spaces, tuple)
-        buffer = tuple([_setup_buf(t) for t in space.spaces])
+        return tuple([_setup_buf(t) for t in space.spaces])
     else:
-        buffer = ShArray(space.dtype, space.shape)
-    return buffer
+        return ShArray(space.dtype, space.shape)
+
+
+def _worker(
+    parent: connection.Connection,
+    p: connection.Connection,
+    env_fn_wrapper: CloudpickleWrapper,
+    obs_bufs: Optional[Union[dict, tuple, ShArray]] = None,
+) -> None:
+    def _encode_obs(
+        obs: Union[dict, tuple, np.ndarray],
+        buffer: Union[dict, tuple, ShArray],
+    ) -> None:
+        if isinstance(obs, np.ndarray) and isinstance(buffer, ShArray):
+            buffer.save(obs)
+        elif isinstance(obs, tuple) and isinstance(buffer, tuple):
+            for o, b in zip(obs, buffer):
+                _encode_obs(o, b)
+        elif isinstance(obs, dict) and isinstance(buffer, dict):
+            for k in obs.keys():
+                _encode_obs(obs[k], buffer[k])
+        return None
+
+    parent.close()
+    env = env_fn_wrapper.data()
+    try:
+        while True:
+            try:
+                cmd, data = p.recv()
+            except EOFError:  # the pipe has been closed
+                p.close()
+                break
+            if cmd == "step":
+                obs, reward, done, info = env.step(data)
+                if obs_bufs is not None:
+                    _encode_obs(obs, obs_bufs)
+                    obs = None
+                p.send((obs, reward, done, info))
+            elif cmd == "reset":
+                obs = env.reset()
+                if obs_bufs is not None:
+                    _encode_obs(obs, obs_bufs)
+                    obs = None
+                p.send(obs)
+            elif cmd == "close":
+                p.send(env.close())
+                p.close()
+                break
+            elif cmd == "render":
+                p.send(env.render(**data) if hasattr(env, "render") else None)
+            elif cmd == "seed":
+                p.send(env.seed(data) if hasattr(env, "seed") else None)
+            elif cmd == "getattr":
+                p.send(getattr(env, data) if hasattr(env, data) else None)
+            else:
+                p.close()
+                raise NotImplementedError
+    except KeyboardInterrupt:
+        p.close()
 
 
 class SubprocEnvWorker(EnvWorker):
     """Subprocess worker used in SubprocVectorEnv and ShmemVectorEnv."""
 
-    def __init__(self, env_fn: Callable[[], gym.Env],
-                 share_memory=False) -> None:
+    def __init__(
+        self, env_fn: Callable[[], gym.Env], share_memory: bool = False
+    ) -> None:
         super().__init__(env_fn)
         self.parent_remote, self.child_remote = Pipe()
         self.share_memory = share_memory
-        self.buffer = None
+        self.buffer: Optional[Union[dict, tuple, ShArray]] = None
         if self.share_memory:
             dummy = env_fn()
             obs_space = dummy.observation_space
             dummy.close()
             del dummy
             self.buffer = _setup_buf(obs_space)
-        args = (self.parent_remote, self.child_remote,
-                CloudpickleWrapper(env_fn), self.buffer)
+        args = (
+            self.parent_remote,
+            self.child_remote,
+            CloudpickleWrapper(env_fn),
+            self.buffer,
+        )
         self.process = Process(target=_worker, args=args, daemon=True)
         self.process.start()
         self.child_remote.close()
 
     def __getattr__(self, key: str) -> Any:
-        self.parent_remote.send(['getattr', key])
+        self.parent_remote.send(["getattr", key])
         return self.parent_remote.recv()
 
-    def _decode_obs(self, isNone):
-        def decode_obs(buffer):
+    def _decode_obs(self) -> Union[dict, tuple, np.ndarray]:
+        def decode_obs(
+            buffer: Optional[Union[dict, tuple, ShArray]]
+        ) -> Union[dict, tuple, np.ndarray]:
             if isinstance(buffer, ShArray):
                 return buffer.get()
             elif isinstance(buffer, tuple):
@@ -145,55 +164,56 @@ class SubprocEnvWorker(EnvWorker):
         return decode_obs(self.buffer)
 
     def reset(self) -> Any:
-        self.parent_remote.send(['reset', None])
+        self.parent_remote.send(["reset", None])
         obs = self.parent_remote.recv()
         if self.share_memory:
-            obs = self._decode_obs(obs)
+            obs = self._decode_obs()
         return obs
 
     @staticmethod
-    def wait(workers: List['SubprocEnvWorker'],
-             wait_num: int,
-             timeout: Optional[float] = None) -> List['SubprocEnvWorker']:
-        conns, ready_conns = [x.parent_remote for x in workers], []
-        remain_conns = conns
-        t1 = time.time()
+    def wait(  # type: ignore
+        workers: List["SubprocEnvWorker"],
+        wait_num: int,
+        timeout: Optional[float] = None,
+    ) -> List["SubprocEnvWorker"]:
+        remain_conns = conns = [x.parent_remote for x in workers]
+        ready_conns: List[connection.Connection] = []
+        remain_time, t1 = timeout, time.time()
         while len(remain_conns) > 0 and len(ready_conns) < wait_num:
             if timeout:
                 remain_time = timeout - (time.time() - t1)
                 if remain_time <= 0:
                     break
-            else:
-                remain_time = timeout
             # connection.wait hangs if the list is empty
             new_ready_conns = connection.wait(
                 remain_conns, timeout=remain_time)
-            ready_conns.extend(new_ready_conns)
-            remain_conns = [conn for conn in remain_conns
-                            if conn not in ready_conns]
+            ready_conns.extend(new_ready_conns)  # type: ignore
+            remain_conns = [
+                conn for conn in remain_conns if conn not in ready_conns]
         return [workers[conns.index(con)] for con in ready_conns]
 
     def send_action(self, action: np.ndarray) -> None:
-        self.parent_remote.send(['step', action])
+        self.parent_remote.send(["step", action])
 
-    def get_result(self) -> Tuple[
-            np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    def get_result(
+        self,
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         obs, rew, done, info = self.parent_remote.recv()
         if self.share_memory:
-            obs = self._decode_obs(obs)
+            obs = self._decode_obs()
         return obs, rew, done, info
 
-    def seed(self, seed: Optional[int] = None) -> List[int]:
-        self.parent_remote.send(['seed', seed])
+    def seed(self, seed: Optional[int] = None) -> Optional[List[int]]:
+        self.parent_remote.send(["seed", seed])
         return self.parent_remote.recv()
 
-    def render(self, **kwargs) -> Any:
-        self.parent_remote.send(['render', kwargs])
+    def render(self, **kwargs: Any) -> Any:
+        self.parent_remote.send(["render", kwargs])
         return self.parent_remote.recv()
 
     def close_env(self) -> None:
         try:
-            self.parent_remote.send(['close', None])
+            self.parent_remote.send(["close", None])
             # mp may be deleted so it may raise AttributeError
             self.parent_remote.recv()
             self.process.join()

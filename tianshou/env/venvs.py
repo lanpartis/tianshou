@@ -1,14 +1,15 @@
 import gym
-import warnings
 import numpy as np
-from typing import List, Union, Optional, Callable, Any
+from typing import Any, List, Union, Optional, Callable
 
 from tianshou.env.worker import EnvWorker, DummyEnvWorker, SubprocEnvWorker, \
     RayEnvWorker
 
 
 class BaseVectorEnv(gym.Env):
-    """Base class for vectorized environments wrapper. Usage:
+    """Base class for vectorized environments wrapper.
+
+    Usage:
     ::
 
         env_num = 8
@@ -45,7 +46,7 @@ class BaseVectorEnv(gym.Env):
     :param env_fns: a list of callable envs, ``env_fns[i]()`` generates the ith
         env.
     :param worker_fn: a callable worker, ``worker_fn(env_fns[i])`` generates a
-        worker which contains this env.
+        worker which contains the i-th env.
     :param int wait_num: use in asynchronous simulation if the time cost of
         ``env.step`` varies with time and synchronously waiting for all
         environments to finish a step is time-wasting. In that case, we can
@@ -57,12 +58,13 @@ class BaseVectorEnv(gym.Env):
         within ``timeout`` seconds.
     """
 
-    def __init__(self,
-                 env_fns: List[Callable[[], gym.Env]],
-                 worker_fn: Callable[[Callable[[], gym.Env]], EnvWorker],
-                 wait_num: Optional[int] = None,
-                 timeout: Optional[float] = None,
-                 ) -> None:
+    def __init__(
+        self,
+        env_fns: List[Callable[[], gym.Env]],
+        worker_fn: Callable[[Callable[[], gym.Env]], EnvWorker],
+        wait_num: Optional[int] = None,
+        timeout: Optional[float] = None,
+    ) -> None:
         self._env_fns = env_fns
         # A VectorEnv contains a pool of EnvWorkers, which corresponds to
         # interact with the given envs (one worker <-> one env).
@@ -73,35 +75,40 @@ class BaseVectorEnv(gym.Env):
 
         self.env_num = len(env_fns)
         self.wait_num = wait_num or len(env_fns)
-        assert 1 <= self.wait_num <= len(env_fns), \
-            f'wait_num should be in [1, {len(env_fns)}], but got {wait_num}'
+        assert (
+            1 <= self.wait_num <= len(env_fns)
+        ), f"wait_num should be in [1, {len(env_fns)}], but got {wait_num}"
         self.timeout = timeout
-        assert self.timeout is None or self.timeout > 0, \
-            f'timeout is {timeout}, it should be positive if provided!'
+        assert (
+            self.timeout is None or self.timeout > 0
+        ), f"timeout is {timeout}, it should be positive if provided!"
         self.is_async = self.wait_num != len(env_fns) or timeout is not None
-        self.waiting_conn = []
+        self.waiting_conn: List[EnvWorker] = []
         # environments in self.ready_id is actually ready
         # but environments in self.waiting_id are just waiting when checked,
         # and they may be ready now, but this is not known until we check it
         # in the step() function
-        self.waiting_id = []
+        self.waiting_id: List[int] = []
         # all environments are ready in the beginning
         self.ready_id = list(range(self.env_num))
         self.is_closed = False
 
     def _assert_is_not_closed(self) -> None:
-        assert not self.is_closed, f"Methods of {self.__class__.__name__} "\
-            "should not be called after close."
+        assert not self.is_closed, (
+            f"Methods of {self.__class__.__name__} cannot be called after "
+            "close.")
 
     def __len__(self) -> int:
         """Return len(self), which is the number of environments."""
         return self.env_num
 
     def __getattribute__(self, key: str) -> Any:
-        """Any class who inherits ``gym.Env`` will inherit some attributes,
-        like ``action_space``. However, we would like the attribute lookup to
-        go straight into the worker (in fact, this vector env's action_space
-        is always ``None``).
+        """Switch the attribute getter depending on the key.
+
+        Any class who inherits ``gym.Env`` will inherit some attributes, like
+        ``action_space``. However, we would like the attribute lookup to go
+        straight into the worker (in fact, this vector env's action_space is
+        always None).
         """
         if key in ['metadata', 'reward_range', 'spec', 'action_space',
                    'observation_space']:  # reserved keys in gym.Env
@@ -109,15 +116,18 @@ class BaseVectorEnv(gym.Env):
         else:
             return super().__getattribute__(key)
 
-    def __getattr__(self, key: str) -> Any:
-        """Try to retrieve an attribute from each individual wrapped
-        environment, if it does not belong to the wrapping vector environment
-        class.
+    def __getattr__(self, key: str) -> List[Any]:
+        """Fetch a list of env attributes.
+
+        This function tries to retrieve an attribute from each individual
+        wrapped environment, if it does not belong to the wrapping vector
+        environment class.
         """
         return [getattr(worker, key) for worker in self.workers]
 
-    def _wrap_id(self, id: Optional[Union[int, List[int], np.ndarray]] = None
-                 ) -> List[int]:
+    def _wrap_id(
+        self, id: Optional[Union[int, List[int], np.ndarray]] = None
+    ) -> Union[List[int], np.ndarray]:
         if id is None:
             id = list(range(self.env_num))
         elif np.isscalar(id):
@@ -126,16 +136,21 @@ class BaseVectorEnv(gym.Env):
 
     def _assert_id(self, id: List[int]) -> None:
         for i in id:
-            assert i not in self.waiting_id, \
-                f'Cannot interact with environment {i} which is stepping now.'
-            assert i in self.ready_id, \
-                f'Can only interact with ready environments {self.ready_id}.'
+            assert (
+                i not in self.waiting_id
+            ), f"Cannot interact with environment {i} which is stepping now."
+            assert (
+                i in self.ready_id
+            ), f"Can only interact with ready environments {self.ready_id}."
 
-    def reset(self, id: Optional[Union[int, List[int], np.ndarray]] = None
-              ) -> np.ndarray:
-        """Reset the state of all the environments and return initial
-        observations if id is ``None``, otherwise reset the specific
-        environments with the given id, either an int or a list.
+    def reset(
+        self, id: Optional[Union[int, List[int], np.ndarray]] = None
+    ) -> np.ndarray:
+        """Reset the state of some envs and return initial observations.
+
+        If id is None, reset the state of all the environments and return
+        initial observations, otherwise reset the specific environments with
+        the given id, either an int or a list.
         """
         self._assert_is_not_closed()
         id = self._wrap_id(id)
@@ -144,11 +159,14 @@ class BaseVectorEnv(gym.Env):
         obs = np.stack([self.workers[i].reset() for i in id])
         return obs
 
-    def step(self,
-             action: np.ndarray,
-             id: Optional[Union[int, List[int], np.ndarray]] = None
-             ) -> List[np.ndarray]:
-        """Run one timestep of all the environments’ dynamics if id is "None",
+    def step(
+        self,
+        action: np.ndarray,
+        id: Optional[Union[int, List[int], np.ndarray]] = None
+    ) -> List[np.ndarray]:
+        """Run one timestep of some environments' dynamics.
+
+        If id is None, run one timestep of all the environments’ dynamics;
         otherwise run one timestep for some environments with given id,  either
         an int or a list. When the end of episode is reached, you are
         responsible for calling reset(id) to reset this environment’s state.
@@ -175,7 +193,7 @@ class BaseVectorEnv(gym.Env):
         should correspond to the ``id`` argument, and the ``id`` argument
         should be a subset of the ``env_id`` in the last returned ``info``
         (initially they are env_ids of all the environments). If action is
-        ``None``, fetch unfinished step() calls instead.
+        None, fetch unfinished step() calls instead.
         """
         self._assert_is_not_closed()
         id = self._wrap_id(id)
@@ -197,10 +215,11 @@ class BaseVectorEnv(gym.Env):
                     self.waiting_conn.append(self.workers[env_id])
                     self.waiting_id.append(env_id)
                 self.ready_id = [x for x in self.ready_id if x not in id]
-            ready_conns, result = [], []
+            ready_conns: List[EnvWorker] = []
             while not ready_conns:
                 ready_conns = self.worker_class.wait(
                     self.waiting_conn, self.wait_num, self.timeout)
+            result = []
             for conn in ready_conns:
                 waiting_index = self.waiting_conn.index(conn)
                 self.waiting_conn.pop(waiting_index)
@@ -211,8 +230,9 @@ class BaseVectorEnv(gym.Env):
                 self.ready_id.append(env_id)
         return list(map(np.stack, zip(*result)))
 
-    def seed(self,
-             seed: Optional[Union[int, List[int]]] = None) -> List[List[int]]:
+    def seed(
+        self, seed: Optional[Union[int, List[int]]] = None
+    ) -> List[Optional[List[int]]]:
         """Set the seed for all environments.
 
         Accept ``None``, an int (which will extend ``i`` to
@@ -223,25 +243,30 @@ class BaseVectorEnv(gym.Env):
             which a reproducer pass to "seed".
         """
         self._assert_is_not_closed()
+        seed_list: Union[List[None], List[int]]
         if seed is None:
-            seed = [seed] * self.env_num
-        elif np.isscalar(seed):
-            seed = [seed + i for i in range(self.env_num)]
-        return [w.seed(s) for w, s in zip(self.workers, seed)]
+            seed_list = [seed] * self.env_num
+        elif isinstance(seed, int):
+            seed_list = [seed + i for i in range(self.env_num)]
+        else:
+            seed_list = seed
+        return [w.seed(s) for w, s in zip(self.workers, seed_list)]
 
-    def render(self, **kwargs) -> List[Any]:
+    def render(self, **kwargs: Any) -> List[Any]:
         """Render all of the environments."""
         self._assert_is_not_closed()
         if self.is_async and len(self.waiting_id) > 0:
             raise RuntimeError(
-                f"Environments {self.waiting_id} are still "
-                f"stepping, cannot render them now.")
+                f"Environments {self.waiting_id} are still stepping, cannot "
+                "render them now.")
         return [w.render(**kwargs) for w in self.workers]
 
     def close(self) -> None:
-        """Close all of the environments. This function will be called only
-        once (if not, it will be called during garbage collected). This way,
-        ``close`` of all workers can be assured.
+        """Close all of the environments.
+
+        This function will be called only once (if not, it will be called
+        during garbage collected). This way, ``close`` of all workers can be
+        assured.
         """
         self._assert_is_not_closed()
         for w in self.workers:
@@ -249,6 +274,7 @@ class BaseVectorEnv(gym.Env):
         self.is_closed = True
 
     def __del__(self) -> None:
+        """Redirect to self.close()."""
         if not self.is_closed:
             self.close()
 
@@ -262,19 +288,14 @@ class DummyVectorEnv(BaseVectorEnv):
         explanation.
     """
 
-    def __init__(self, env_fns: List[Callable[[], gym.Env]],
-                 wait_num: Optional[int] = None,
-                 timeout: Optional[float] = None) -> None:
-        super().__init__(env_fns, DummyEnvWorker,
-                         wait_num=wait_num, timeout=timeout)
-
-
-class VectorEnv(DummyVectorEnv):
-    def __init__(self, *args, **kwargs) -> None:
-        warnings.warn(
-            'VectorEnv is renamed to DummyVectorEnv, and will be removed in '
-            '0.3. Use DummyVectorEnv instead!', Warning)
-        super().__init__(*args, **kwargs)
+    def __init__(
+        self,
+        env_fns: List[Callable[[], gym.Env]],
+        wait_num: Optional[int] = None,
+        timeout: Optional[float] = None,
+    ) -> None:
+        super().__init__(
+            env_fns, DummyEnvWorker, wait_num=wait_num, timeout=timeout)
 
 
 class SubprocVectorEnv(BaseVectorEnv):
@@ -286,19 +307,23 @@ class SubprocVectorEnv(BaseVectorEnv):
         explanation.
     """
 
-    def __init__(self, env_fns: List[Callable[[], gym.Env]],
-                 wait_num: Optional[int] = None,
-                 timeout: Optional[float] = None) -> None:
-        def worker_fn(fn):
+    def __init__(
+        self,
+        env_fns: List[Callable[[], gym.Env]],
+        wait_num: Optional[int] = None,
+        timeout: Optional[float] = None,
+    ) -> None:
+        def worker_fn(fn: Callable[[], gym.Env]) -> SubprocEnvWorker:
             return SubprocEnvWorker(fn, share_memory=False)
-        super().__init__(env_fns, worker_fn,
-                         wait_num=wait_num, timeout=timeout)
+
+        super().__init__(
+            env_fns, worker_fn, wait_num=wait_num, timeout=timeout)
 
 
 class ShmemVectorEnv(BaseVectorEnv):
-    """Optimized version of SubprocVectorEnv which uses shared variables to
-    communicate observations. ShmemVectorEnv has exactly the same API as
-    SubprocVectorEnv.
+    """Optimized SubprocVectorEnv with shared buffers to exchange observations.
+
+    ShmemVectorEnv has exactly the same API as SubprocVectorEnv.
 
     .. seealso::
 
@@ -306,19 +331,23 @@ class ShmemVectorEnv(BaseVectorEnv):
         detailed explanation.
     """
 
-    def __init__(self, env_fns: List[Callable[[], gym.Env]],
-                 wait_num: Optional[int] = None,
-                 timeout: Optional[float] = None) -> None:
-        def worker_fn(fn):
+    def __init__(
+        self,
+        env_fns: List[Callable[[], gym.Env]],
+        wait_num: Optional[int] = None,
+        timeout: Optional[float] = None,
+    ) -> None:
+        def worker_fn(fn: Callable[[], gym.Env]) -> SubprocEnvWorker:
             return SubprocEnvWorker(fn, share_memory=True)
-        super().__init__(env_fns, worker_fn,
-                         wait_num=wait_num, timeout=timeout)
+
+        super().__init__(
+            env_fns, worker_fn, wait_num=wait_num, timeout=timeout)
 
 
 class RayVectorEnv(BaseVectorEnv):
-    """Vectorized environment wrapper based on
-    `ray <https://github.com/ray-project/ray>`_. This is a choice to run
-    distributed environments in a cluster.
+    """Vectorized environment wrapper based on ray.
+
+    This is a choice to run distributed environments in a cluster.
 
     .. seealso::
 
@@ -326,16 +355,19 @@ class RayVectorEnv(BaseVectorEnv):
         explanation.
     """
 
-    def __init__(self, env_fns: List[Callable[[], gym.Env]],
-                 wait_num: Optional[int] = None,
-                 timeout: Optional[float] = None) -> None:
+    def __init__(
+        self,
+        env_fns: List[Callable[[], gym.Env]],
+        wait_num: Optional[int] = None,
+        timeout: Optional[float] = None,
+    ) -> None:
         try:
             import ray
         except ImportError as e:
             raise ImportError(
-                'Please install ray to support RayVectorEnv: pip install ray'
+                "Please install ray to support RayVectorEnv: pip install ray"
             ) from e
         if not ray.is_initialized():
             ray.init()
-        super().__init__(env_fns, RayEnvWorker,
-                         wait_num=wait_num, timeout=timeout)
+        super().__init__(
+            env_fns, RayEnvWorker, wait_num=wait_num, timeout=timeout)

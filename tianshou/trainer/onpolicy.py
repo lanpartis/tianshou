@@ -36,8 +36,9 @@ def onpolicy_trainer(
         start_epoch: int = 1,
         result_df: pd.DataFrame = pd.DataFrame()
 ) -> Dict[str, Union[float, str]]:
-    """A wrapper for on-policy trainer procedure. The ``step`` in trainer means
-    a policy network update.
+    """A wrapper for on-policy trainer procedure.
+
+    The "step" in trainer means a policy network update.
 
     :param policy: an instance of the :class:`~tianshou.policy.BasePolicy`
         class.
@@ -80,8 +81,8 @@ def onpolicy_trainer(
     """
     global_step = start_epoch * step_per_epoch * collect_per_step
     
-    best_epoch, best_reward = -1, -1.
-    stat = {}
+    best_epoch, best_reward = -1, -1.0
+    stat: Dict[str, MovAvg] = {}
     start_time = time.time()
     test_in_train = test_in_train and train_collector.policy == policy
     for epoch in range(start_epoch, 1 + max_epoch):
@@ -102,7 +103,7 @@ def onpolicy_trainer(
                         if save_fn:
                             save_fn(policy, test_result, best_reward, epoch)
                         for k in result.keys():
-                            data[k] = f'{result[k]:.2f}'
+                            data[k] = f"{result[k]:.2f}"
                         t.set_postfix(**data)
                         return gather_info(
                             start_time, train_collector, test_collector,
@@ -114,23 +115,24 @@ def onpolicy_trainer(
                 if prelearn_fn:
                     prelearn_fn(policy, epoch)
                 losses = policy.update(
-                    0, train_collector.buffer, batch_size, repeat_per_collect)
+                    0, train_collector.buffer,
+                    batch_size=batch_size, repeat=repeat_per_collect)
                 train_collector.reset_buffer()
                 step = 1
-                for k in losses.keys():
-                    if isinstance(losses[k], list):
-                        step = max(step, len(losses[k]))
+                for v in losses.values():
+                    if isinstance(v, list):
+                        step = max(step, len(v))
                 global_step += step * collect_per_step
                 for k in result.keys():
-                    data[k] = f'{result[k]:.2f}'
+                    data[k] = f"{result[k]:.2f}"
                     if writer and global_step % log_interval == 0:
                         writer.add_scalar(
-                            'train/' + k, result[k], global_step=global_step)
+                            "train/" + k, result[k], global_step=global_step)
                 for k in losses.keys():
                     if stat.get(k) is None:
                         stat[k] = MovAvg()
                     stat[k].add(losses[k])
-                    data[k] = f'{stat[k].get():.6f}'
+                    data[k] = f"{stat[k].get():.6f}"
                     if writer and global_step % log_interval == 0:
                         writer.add_scalar(
                             k, stat[k].get(), global_step=global_step)

@@ -6,12 +6,12 @@ import argparse
 import numpy as np
 from torch.utils.tensorboard import SummaryWriter
 
-from tianshou.env import DummyVectorEnv
 from tianshou.policy import DDPGPolicy
-from tianshou.trainer import offpolicy_trainer
-from tianshou.data import Collector, ReplayBuffer
-from tianshou.exploration import GaussianNoise
+from tianshou.env import DummyVectorEnv
 from tianshou.utils.net.common import Net
+from tianshou.trainer import offpolicy_trainer
+from tianshou.exploration import GaussianNoise
+from tianshou.data import Collector, ReplayBuffer
 from tianshou.utils.net.continuous import Actor, Critic
 
 
@@ -78,8 +78,9 @@ def test_ddpg(args=get_args()):
     critic_optim = torch.optim.Adam(critic.parameters(), lr=args.critic_lr)
     policy = DDPGPolicy(
         actor, actor_optim, critic, critic_optim,
-        args.tau, args.gamma, GaussianNoise(sigma=args.exploration_noise),
-        [env.action_space.low[0], env.action_space.high[0]],
+        action_range=[env.action_space.low[0], env.action_space.high[0]],
+        tau=args.tau, gamma=args.gamma,
+        exploration_noise=GaussianNoise(sigma=args.exploration_noise),
         reward_normalization=args.rew_norm,
         ignore_done=args.ignore_done,
         estimation_step=args.n_step)

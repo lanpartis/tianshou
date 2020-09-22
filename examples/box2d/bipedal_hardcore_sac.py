@@ -24,13 +24,15 @@ def get_args():
     parser.add_argument('--gamma', type=float, default=0.99)
     parser.add_argument('--tau', type=float, default=0.005)
     parser.add_argument('--alpha', type=float, default=0.1)
-    parser.add_argument('--epoch', type=int, default=1000)
-    parser.add_argument('--step-per-epoch', type=int, default=2400)
+    parser.add_argument('--auto_alpha', type=int, default=1)
+    parser.add_argument('--alpha_lr', type=float, default=3e-4)
+    parser.add_argument('--epoch', type=int, default=100)
+    parser.add_argument('--step-per-epoch', type=int, default=10000)
     parser.add_argument('--collect-per-step', type=int, default=10)
     parser.add_argument('--batch-size', type=int, default=128)
     parser.add_argument('--layer-num', type=int, default=1)
     parser.add_argument('--training-num', type=int, default=8)
-    parser.add_argument('--test-num', type=int, default=8)
+    parser.add_argument('--test-num', type=int, default=100)
     parser.add_argument('--logdir', type=str, default='log')
     parser.add_argument('--render', type=float, default=0.)
     parser.add_argument('--rew-norm', type=int, default=0)
@@ -39,14 +41,14 @@ def get_args():
     parser.add_argument(
         '--device', type=str,
         default='cuda' if torch.cuda.is_available() else 'cpu')
+    parser.add_argument('--resume_path', type=str, default=None)
     return parser.parse_args()
 
 
 class EnvWrapper(object):
     """Env wrapper for reward scale, action repeat and action noise"""
 
-    def __init__(self, task, action_repeat=3,
-                 reward_scale=5, act_noise=0.3):
+    def __init__(self, task, action_repeat=3, reward_scale=5, act_noise=0.0):
         self._env = gym.make(task)
         self.action_repeat = action_repeat
         self.reward_scale = reward_scale
@@ -70,8 +72,6 @@ class EnvWrapper(object):
 
 
 def test_sac_bipedal(args=get_args()):
-    torch.set_num_threads(1)  # we just need only one thread for NN
-
     env = EnvWrapper(args.task)
 
     def IsStop(reward):
@@ -111,13 +111,23 @@ def test_sac_bipedal(args=get_args()):
     critic2 = Critic(net_c2, args.device).to(args.device)
     critic2_optim = torch.optim.Adam(critic2.parameters(), lr=args.critic_lr)
 
+    if args.auto_alpha:
+        target_entropy = -np.prod(env.action_space.shape)
+        log_alpha = torch.zeros(1, requires_grad=True, device=args.device)
+        alpha_optim = torch.optim.Adam([log_alpha], lr=args.alpha_lr)
+        args.alpha = (target_entropy, log_alpha, alpha_optim)
+
     policy = SACPolicy(
         actor, actor_optim, critic1, critic1_optim, critic2, critic2_optim,
-        args.tau, args.gamma, args.alpha,
-        [env.action_space.low[0], env.action_space.high[0]],
+        action_range=[env.action_space.low[0], env.action_space.high[0]],
+        tau=args.tau, gamma=args.gamma, alpha=args.alpha,
         reward_normalization=args.rew_norm,
         ignore_done=args.ignore_done,
         estimation_step=args.n_step)
+    # load a previous policy
+    if args.resume_path:
+        policy.load_state_dict(torch.load(args.resume_path))
+        print("Loaded agent from: ", args.resume_path)
 
     # collector
     train_collector = Collector(
@@ -135,7 +145,8 @@ def test_sac_bipedal(args=get_args()):
     result = offpolicy_trainer(
         policy, train_collector, test_collector, args.epoch,
         args.step_per_epoch, args.collect_per_step, args.test_num,
-        args.batch_size, stop_fn=IsStop, save_fn=save_fn, writer=writer)
+        args.batch_size, stop_fn=IsStop, save_fn=save_fn, writer=writer,
+        test_in_train=False)
 
     if __name__ == '__main__':
         pprint.pprint(result)

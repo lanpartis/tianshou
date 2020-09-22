@@ -7,10 +7,10 @@ import numpy as np
 from torch.utils.tensorboard import SummaryWriter
 
 from tianshou.env import DummyVectorEnv
+from tianshou.utils.net.common import Net
 from tianshou.trainer import offpolicy_trainer
 from tianshou.data import Collector, ReplayBuffer
 from tianshou.policy import SACPolicy, ImitationPolicy
-from tianshou.utils.net.common import Net
 from tianshou.utils.net.continuous import Actor, ActorProb, Critic
 
 
@@ -79,8 +79,8 @@ def test_sac_with_il(args=get_args()):
     critic2_optim = torch.optim.Adam(critic2.parameters(), lr=args.critic_lr)
     policy = SACPolicy(
         actor, actor_optim, critic1, critic1_optim, critic2, critic2_optim,
-        args.tau, args.gamma, args.alpha,
-        [env.action_space.low[0], env.action_space.high[0]],
+        action_range=[env.action_space.low[0], env.action_space.high[0]],
+        tau=args.tau, gamma=args.gamma, alpha=args.alpha,
         reward_normalization=args.rew_norm,
         ignore_done=args.ignore_done,
         estimation_step=args.n_step)

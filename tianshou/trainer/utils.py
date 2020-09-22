@@ -8,13 +8,14 @@ from tianshou.policy import BasePolicy
 
 
 def test_episode(
-        policy: BasePolicy,
-        collector: Collector,
-        pretest_fn: Callable[[int], None],
-        epoch: int,
-        n_episode: Union[int, List[int]],
-        writer: SummaryWriter = None,
-        global_step: int = None) -> Dict[str, float]:
+    policy: BasePolicy,
+    collector: Collector,
+    pretest_fn: Optional[Callable[[int], None]],
+    epoch: int,
+    n_episode: Union[int, List[int]],
+    writer: Optional[SummaryWriter] = None,
+    global_step: Optional[int] = None,
+) -> Dict[str, float]:
     """A simple wrapper of testing policy in collector."""
     collector.reset_env()
     collector.reset_buffer()
@@ -33,12 +34,13 @@ def test_episode(
     return result
 
 
-def gather_info(start_time: float,
-                train_c: Collector,
-                test_c: Collector,
-                best_reward: float,
-                **kwargs,
-                ) -> Dict[str, Union[float, str]]:
+def gather_info(
+    start_time: float,
+    train_c: Collector,
+    test_c: Collector,
+    best_reward: float,
+    **kwargs,
+) -> Dict[str, Union[float, str]]:
     """A simple wrapper of gathering information from collectors.
 
     :return: A dictionary with the following keys:
@@ -73,6 +75,6 @@ def gather_info(start_time: float,
         'best_reward': best_reward,
         'duration': f'{duration:.2f}s',
     }
-    for k,v in kwargs.items():
+    for k, v in kwargs.items():
         res[k] = v
     return res

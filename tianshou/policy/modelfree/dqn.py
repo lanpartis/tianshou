@@ -5,7 +5,7 @@ from typing import Any, Dict, Union, Optional
 
 from tianshou.policy import BasePolicy
 from tianshou.data import Batch, ReplayBuffer, to_torch_as, to_numpy
-
+from functools import reduce
 
 class DQNPolicy(BasePolicy):
     """Implementation of Deep Q Network. arXiv:1312.5602.
@@ -40,6 +40,7 @@ class DQNPolicy(BasePolicy):
         estimation_step: int = 1,
         target_update_freq: int = 0,
         reward_normalization: bool = False,
+        check_model_interval: int = 100,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -55,6 +56,7 @@ class DQNPolicy(BasePolicy):
         self._target = target_update_freq > 0
         self._freq = target_update_freq
         self._cnt = 0
+        self.check_model_interval = check_model_interval
         if self._target:
             self.model_old = deepcopy(self.model)
             self.model_old.eval()
@@ -178,4 +180,14 @@ class DQNPolicy(BasePolicy):
         loss.backward()
         self.optim.step()
         self._cnt += 1
-        return {"loss": loss.item()}
+        res = {
+            "loss": loss.item(), 
+            "dist/q":q, 
+            "epsilon":self.eps,
+        }
+        if self._cnt % self.check_model_interval==0:
+            model_params = reduce(lambda x,y:torch.cat((x.reshape(-1), y.reshape(-1))) ,map(lambda x:x.data,self.model.parameters()))
+            model_params_grad = reduce(lambda x,y:torch.cat((x.reshape(-1), y.reshape(-1))) ,map(lambda x:x.grad,self.model.parameters()))
+            res["dist/weight"] = model_params.cpu().numpy()
+            res["dist/grad"] = model_params_grad.cpu().numpy() 
+        return res

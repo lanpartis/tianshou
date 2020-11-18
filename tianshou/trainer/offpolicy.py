@@ -81,6 +81,11 @@ def offpolicy_trainer(
     """
     start_epoch = max(start_epoch, 1)
     global_step = (start_epoch - 1) * step_per_epoch * collect_per_step
+    collected_steps = len(train_collector.buffer)
+    sampled_steps = 0
+    update_times = 0
+    log_interval*=collect_per_step
+    assert update_per_step>=1, "update_per_step should be greater or equal than 1"
 
     best_epoch, best_reward = -1, -1.0
     stat: Dict[str, MovAvg] = {}
@@ -95,6 +100,7 @@ def offpolicy_trainer(
                        **tqdm_config) as t:
             while t.n < t.total:
                 result = train_collector.collect(n_step=collect_per_step)
+                collected_steps += result["n/st"]
                 data = {}
                 if test_in_train and stop_fn and stop_fn(epoch, result, best_reward):
                     test_result = test_episode(
@@ -115,16 +121,27 @@ def offpolicy_trainer(
                             pretrain_fn(policy, epoch)
                 if prelearn_fn:
                     prelearn_fn(policy, epoch)
-                for i in range(update_per_step * min(
+                for i in range(min(
                         result["n/st"] // collect_per_step, t.total - t.n)):
                     global_step += collect_per_step
-                    losses = policy.update(batch_size, train_collector.buffer)
+                    for _ in range(update_per_step):
+                        losses = policy.update(batch_size, train_collector.buffer)
+                        sampled_steps+=batch_size
+                        update_times+=1
                     for k in result.keys():
-                        data[k] = f"{result[k]:.2f}"
+                        if not k[:5]=='dist/':
+                            data[k] = f"{result[k]:.2f}"
                         if writer and global_step % log_interval == 0:
-                            writer.add_scalar("train/" + k, result[k],
+                            if k[:5]=='dist/':
+                                writer.add_histogram("train/" + k[5:],result[k], 
+                                                     global_step=global_step)
+                            else:
+                                writer.add_scalar("train/" + k, result[k],
                                               global_step=global_step)
                     for k in losses.keys():
+                        if k[:5]=='dist/' and writer and global_step % log_interval == 0:
+                            writer.add_histogram("train/"+k[5:], losses[k], global_step=global_step)
+                            continue
                         if stat.get(k) is None:
                             stat[k] = MovAvg()
                         stat[k].add(losses[k])
@@ -132,12 +149,20 @@ def offpolicy_trainer(
                         if writer and global_step % log_interval == 0:
                             writer.add_scalar(
                                 k, stat[k].get(), global_step=global_step)
+                    if writer and global_step % log_interval == 0: 
+                        if hasattr(train_collector.buffer, "weight"):
+                            weight = train_collector.buffer.weight
+                            writer.add_histogram("train/priority", weight._value[weight._bound:], global_step=global_step)
+                        writer.add_scalar("train/replay_ratio", sampled_steps/collected_steps, global_step=global_step)
+                        writer.add_scalar("train/updates", update_times, global_step=global_step)
                     data_df = pd.DataFrame(data, index=[0])
                     result_df = result_df.append(data_df, ignore_index=True)
                     t.update(1)
                     t.set_postfix(**data)
             if t.n <= t.total:
                 t.update()
+        if writer and global_step % log_interval == 0: 
+            writer.add_scalar("env/sps_overall", collected_steps/(time.time()-start_time), global_step=global_step)
         # test
         result = test_episode(policy, test_collector, pretest_fn, epoch,
                               episode_per_test, writer, global_step)

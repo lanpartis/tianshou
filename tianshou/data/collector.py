@@ -204,6 +204,7 @@ class Collector(object):
         f"got n_step = {n_step}, n_episode = {n_episode}."
         start_time = time.time()
         step_count = 0
+        rewards = np.full(self.env_num, -np.inf)
         # episode of each environment
         episode_count = np.zeros(self.env_num)
         # If n_episode is a list, and some envs have collected the required
@@ -308,6 +309,7 @@ class Collector(object):
                             and episode_count[i] >= n_episode[i]):
                         episode_count[i] += 1
                         reward_total += np.sum(self._cached_buf[i].rew, axis=0)
+                        rewards[i] = np.sum(self._cached_buf[i].rew, axis=0) 
                         step_count += len(self._cached_buf[i])
                         if self.buffer is not None:
                             self.buffer.update(self._cached_buf[i])
@@ -361,12 +363,15 @@ class Collector(object):
         reward_avg = reward_total / episode_count
         if np.asanyarray(reward_avg).size > 1:  # non-scalar reward_avg
             reward_avg = self._rew_metric(reward_avg)  # type: ignore
+        collected_rewards = rewards[rewards>-np.inf]
         return {
-            "n/ep": episode_count,
-            "n/st": step_count,
-            "v/st": step_count / duration,
-            "v/ep": episode_count / duration,
-            "rew": reward_avg,
+            'rew': reward_avg,
+            'rew_std': np.std(collected_rewards),
+            'dist/rewards':collected_rewards,
+            "n/episode": episode_count,
+            "n/step": step_count,
+            "v/step": step_count / duration,
+            "v/episode": episode_count / duration,
             "len": step_count / episode_count,
         }
 

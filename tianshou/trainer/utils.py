@@ -30,7 +30,10 @@ def test_episode(
     result = collector.collect(n_episode=n_episode)
     if writer is not None and global_step is not None:
         for k in result.keys():
-            writer.add_scalar("test/" + k, result[k], global_step=global_step)
+            if k[:5]=='dist/':
+                writer.add_histogram("test/" + k,result[k], global_step=global_step)
+            else:
+                writer.add_scalar("test/" + k, result[k], global_step=global_step)
     return result
 
 

@@ -82,6 +82,11 @@ def onpolicy_trainer(
     start_epoch = max(start_epoch, 1)
     global_step = (start_epoch - 1) * step_per_epoch * collect_per_step
     
+    collected_steps = len(train_collector.buffer)
+    sampled_steps = 0
+    update_times = 0
+    log_interval*=collect_per_step
+
     best_epoch, best_reward = -1, -1.0
     stat: Dict[str, MovAvg] = {}
     start_time = time.time()
@@ -95,6 +100,7 @@ def onpolicy_trainer(
                        **tqdm_config) as t:
             while t.n < t.total:
                 result = train_collector.collect(n_episode=collect_per_step)
+                collected_steps += result["n/st"]
                 data = {}
                 if test_in_train and stop_fn and stop_fn(epoch, result, best_reward):
                     test_result = test_episode(
@@ -118,6 +124,8 @@ def onpolicy_trainer(
                 losses = policy.update(
                     0, train_collector.buffer,
                     batch_size=batch_size, repeat=repeat_per_collect)
+                sampled_steps+=batch_size*repeat_per_collect
+                update_times+=repeat_per_collect
                 train_collector.reset_buffer()
                 step = 1
                 for v in losses.values():
@@ -125,11 +133,19 @@ def onpolicy_trainer(
                         step = max(step, len(v))
                 global_step += step * collect_per_step
                 for k in result.keys():
-                    data[k] = f"{result[k]:.2f}"
+                    if not k[:5]=='dist/':
+                        data[k] = f"{result[k]:.2f}"
                     if writer and global_step % log_interval == 0:
-                        writer.add_scalar(
-                            "train/" + k, result[k], global_step=global_step)
+                        if k[:5]=='dist/':
+                            writer.add_histogram("train/" + k[5:],result[k], 
+                                                    global_step=global_step)
+                        else:
+                            writer.add_scalar("train/" + k, result[k],
+                                            global_step=global_step)
                 for k in losses.keys():
+                    if k[:5]=='dist/' and writer and global_step % log_interval == 0:
+                        writer.add_histogram("train/"+k[5:], losses[k], global_step=global_step)
+                        continue
                     if stat.get(k) is None:
                         stat[k] = MovAvg()
                     stat[k].add(losses[k])
@@ -137,6 +153,8 @@ def onpolicy_trainer(
                     if writer and global_step % log_interval == 0:
                         writer.add_scalar(
                             k, stat[k].get(), global_step=global_step)
+                if writer and global_step % log_interval == 0: 
+                    writer.add_scalar("train/updates", update_times, global_step=global_step)
                 data_df = pd.DataFrame(data, index=[0])
                 result_df = result_df.append(data_df, ignore_index=True)
                 t.update(step)
@@ -146,6 +164,8 @@ def onpolicy_trainer(
         # test
         result = test_episode(policy, test_collector, pretest_fn, epoch,
                               episode_per_test, writer, global_step)
+        if writer and global_step % log_interval == 0: 
+            writer.add_scalar("env/sps_overall", collected_steps/(time.time()-start_time), global_step=global_step)
         if postepoch_fn:
             postepoch_fn(epoch=epoch, reward=result["rew"],result_df=result_df)
         if save_fn:

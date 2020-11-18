@@ -100,7 +100,7 @@ def onpolicy_trainer(
                        **tqdm_config) as t:
             while t.n < t.total:
                 result = train_collector.collect(n_episode=collect_per_step)
-                collected_steps += result["n/st"]
+                collected_steps += result["n/step"]
                 data = {}
                 if test_in_train and stop_fn and stop_fn(epoch, result, best_reward):
                     test_result = test_episode(

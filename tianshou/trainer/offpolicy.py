@@ -122,7 +122,7 @@ def offpolicy_trainer(
                 if prelearn_fn:
                     prelearn_fn(policy, epoch)
                 for i in range(min(
-                        result["n/st"] // collect_per_step, t.total - t.n)):
+                        result["n/step"] // collect_per_step, t.total - t.n)):
                     global_step += collect_per_step
                     for _ in range(update_per_step):
                         losses = policy.update(batch_size, train_collector.buffer)

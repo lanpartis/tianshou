@@ -15,6 +15,7 @@ def test_episode(
     n_episode: Union[int, List[int]],
     writer: Optional[SummaryWriter] = None,
     global_step: Optional[int] = None,
+    aim_session=None,
 ) -> Dict[str, float]:
     """A simple wrapper of testing policy in collector."""
     collector.reset_env()
@@ -34,6 +35,17 @@ def test_episode(
                 writer.add_histogram("test/" + k,result[k], global_step=global_step)
             else:
                 writer.add_scalar("test/" + k, result[k], global_step=global_step)
+    if aim_session is not None and global_step is not None:
+        for k in result.keys():
+            if k[:5] == "dist/":
+                pass
+            else:
+                aim_session.track(
+                    result[k],
+                    name=k.replace("/", "_"),
+                    epoch=global_step,
+                    tag="test",
+                )
     return result
 
 

@@ -34,7 +34,8 @@ def offpolicy_trainer(
         test_in_train: bool = True,
         logger: Logger = None,
         start_epoch: int = 1,
-        result_df: pd.DataFrame = pd.DataFrame()
+        result_df: pd.DataFrame = pd.DataFrame(),
+        aim_session=None,
 ) -> Dict[str, Union[float, str]]:
     """A wrapper for off-policy trainer procedure.
 
@@ -76,6 +77,7 @@ def offpolicy_trainer(
     :param int log_interval: the log interval of the writer.
     :param bool verbose: whether to print the information.
     :param bool test_in_train: whether to test in the training phase.
+    :param aim.Session:record experiment.https://github.com/aimhubio/aim
 
     :return: See :func:`~tianshou.trainer.gather_info`.
     """
@@ -132,12 +134,22 @@ def offpolicy_trainer(
                         if not k[:5]=='dist/':
                             data[k] = f"{result[k]:.2f}"
                         if writer and global_step % log_interval == 0:
-                            if k[:5]=='dist/':
-                                writer.add_histogram("train/" + k[5:],result[k], 
+                            if k[:5]=='dist/': 
+                                writer.add_histogram("train/" + k[5:],result[k],
                                                      global_step=global_step)
                             else:
                                 writer.add_scalar("train/" + k, result[k],
                                               global_step=global_step)
+                        if aim_session and global_step % log_interval == 0:
+                            if k[:5] == "dist/":
+                                pass
+                            else:
+                                aim_session.track(
+                                    result[k],
+                                    name=k.replace("/", "_"),
+                                    epoch=global_step,
+                                    tag="train",
+                                )
                     for k in losses.keys():
                         if k[:5]=='dist/' and writer and global_step % log_interval == 0:
                             writer.add_histogram("train/"+k[5:], losses[k], global_step=global_step)
@@ -149,12 +161,29 @@ def offpolicy_trainer(
                         if writer and global_step % log_interval == 0:
                             writer.add_scalar(
                                 k, stat[k].get(), global_step=global_step)
-                    if writer and global_step % log_interval == 0: 
+                        if aim_session and global_step % log_interval == 0:
+                            aim_session.track(
+                                stat[k].get(), name=k, epoch=global_step,
+                            )
+                    if writer and global_step % log_interval == 0:
                         if hasattr(train_collector.buffer, "weight"):
                             weight = train_collector.buffer.weight
                             writer.add_histogram("train/priority", weight._value[weight._bound:], global_step=global_step)
                         writer.add_scalar("train/replay_ratio", sampled_steps/collected_steps, global_step=global_step)
                         writer.add_scalar("train/updates", update_times, global_step=global_step)
+                    if aim_session and global_step % log_interval == 0:
+                        aim_session.track(
+                            sampled_steps / collected_steps,
+                            name="replay_ratio",
+                            epoch=global_step,
+                            tag="train",
+                        )
+                        aim_session.track(
+                            update_times,
+                            name="updates",
+                            epoch=global_step,
+                            tag="train",
+                        )
                     data_df = pd.DataFrame(data, index=[0])
                     result_df = result_df.append(data_df, ignore_index=True)
                     t.update(1)
@@ -163,9 +192,15 @@ def offpolicy_trainer(
                 t.update()
         if writer and global_step % log_interval == 0: 
             writer.add_scalar("env/sps_overall", collected_steps/(time.time()-start_time), global_step=global_step)
+        if aim_session and global_step % log_interval == 0:
+            aim_session.track(
+                collected_steps / (time.time() - start_time),
+                name="env_sps_overall",
+                epoch=global_step,
+            )
         # test
         result = test_episode(policy, test_collector, pretest_fn, epoch,
-                              episode_per_test, writer, global_step)
+                              episode_per_test, writer, global_step,aim_session,)
         if postepoch_fn:
             postepoch_fn(epoch=epoch, reward=result["rew"], buffer=train_collector.buffer, result_df=result_df)
 

@@ -5,7 +5,7 @@ from typing import Dict, List, Union, Callable, Optional
 from logging import Logger
 import pandas as pd
 
-from tianshou.data import Collector, ReplayBuffer
+from tianshou.data import Collector, ReplayBuffer, SegmentTree
 from tianshou.policy import BasePolicy
 from tianshou.utils import tqdm_config, MovAvg
 from tianshou.trainer import test_episode, gather_info
@@ -166,7 +166,7 @@ def offpolicy_trainer(
                                 stat[k].get(), name=k, epoch=global_step,
                             )
                     if writer and global_step % log_interval == 0:
-                        if hasattr(train_collector.buffer, "weight"):
+                        if hasattr(train_collector.buffer, "weight") and isinstance(train_collector.buffer.weight, SegmentTree):
                             weight = train_collector.buffer.weight
                             writer.add_histogram("train/priority", weight._value[weight._bound:], global_step=global_step)
                         writer.add_scalar("train/replay_ratio", sampled_steps/collected_steps, global_step=global_step)
